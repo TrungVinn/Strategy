@@ -1,11 +1,21 @@
 """LangGraph agent for crypto market analysis"""
-from typing import TypedDict, Annotated
+from typing import TypedDict, Annotated, Optional
 from langgraph.graph import StateGraph, END
 import asyncio
-from models import AgentState, MarketData, MarketAnalysis
+from models import MarketData, MarketAnalysis
 from data_collector import get_data_collector
 from market_analyzer import get_market_analyzer
 from report_generator import get_report_generator
+
+
+# Define state as TypedDict for LangGraph
+class GraphState(TypedDict):
+    """State dictionary for LangGraph"""
+    symbol: str
+    raw_data: Optional[MarketData]
+    analysis: Optional[MarketAnalysis]
+    report: str
+    error: Optional[str]
 
 
 class CryptoAnalysisAgent:
@@ -21,7 +31,7 @@ class CryptoAnalysisAgent:
         """Build the LangGraph workflow"""
         
         # Define the workflow graph
-        workflow = StateGraph(AgentState)
+        workflow = StateGraph(GraphState)
         
         # Add nodes
         workflow.add_node("collect_data", self.collect_data_node)
@@ -36,81 +46,87 @@ class CryptoAnalysisAgent:
         
         return workflow.compile()
     
-    def collect_data_node(self, state: AgentState) -> AgentState:
+    def collect_data_node(self, state: GraphState) -> GraphState:
         """Node: Collect market data"""
         try:
-            print(f"📊 Collecting data for {state.symbol}...")
+            print(f"📊 Collecting data for {state['symbol']}...")
             
             # Run async data collection in sync context
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             market_data = loop.run_until_complete(
-                self.data_collector.collect_market_data(state.symbol)
+                self.data_collector.collect_market_data(state['symbol'])
             )
             loop.close()
             
-            state.raw_data = market_data
-            print(f"✅ Data collected for {state.symbol}")
+            state['raw_data'] = market_data
+            print(f"✅ Data collected for {state['symbol']}")
             
         except Exception as e:
             print(f"❌ Error collecting data: {e}")
-            state.error = f"Lỗi thu thập dữ liệu: {str(e)}"
+            state['error'] = f"Lỗi thu thập dữ liệu: {str(e)}"
         
         return state
     
-    def analyze_market_node(self, state: AgentState) -> AgentState:
+    def analyze_market_node(self, state: GraphState) -> GraphState:
         """Node: Analyze market data"""
         try:
-            if state.error or not state.raw_data:
+            if state.get('error') or not state.get('raw_data'):
                 return state
             
-            print(f"🔍 Analyzing market for {state.symbol}...")
+            print(f"🔍 Analyzing market for {state['symbol']}...")
             
-            analysis = self.market_analyzer.analyze_market(state.raw_data)
-            state.analysis = analysis
+            analysis = self.market_analyzer.analyze_market(state['raw_data'])
+            state['analysis'] = analysis
             
-            print(f"✅ Analysis completed for {state.symbol}")
+            print(f"✅ Analysis completed for {state['symbol']}")
             
         except Exception as e:
             print(f"❌ Error analyzing market: {e}")
-            state.error = f"Lỗi phân tích: {str(e)}"
+            state['error'] = f"Lỗi phân tích: {str(e)}"
         
         return state
     
-    def generate_report_node(self, state: AgentState) -> AgentState:
+    def generate_report_node(self, state: GraphState) -> GraphState:
         """Node: Generate analysis report"""
         try:
-            if state.error:
-                state.report = f"❌ {state.error}\n\nChưa đủ dữ liệu — đang chờ cập nhật."
+            if state.get('error'):
+                state['report'] = f"❌ {state['error']}\n\nChưa đủ dữ liệu — đang chờ cập nhật."
                 return state
             
-            if not state.analysis:
-                state.report = "❌ Chưa có phân tích.\n\nChưa đủ dữ liệu — đang chờ cập nhật."
+            if not state.get('analysis'):
+                state['report'] = "❌ Chưa có phân tích.\n\nChưa đủ dữ liệu — đang chờ cập nhật."
                 return state
             
-            print(f"📝 Generating report for {state.symbol}...")
+            print(f"📝 Generating report for {state['symbol']}...")
             
-            report = self.report_generator.format_report(state.analysis)
-            state.report = report
+            report = self.report_generator.format_report(state['analysis'])
+            state['report'] = report
             
-            print(f"✅ Report generated for {state.symbol}")
+            print(f"✅ Report generated for {state['symbol']}")
             
         except Exception as e:
             print(f"❌ Error generating report: {e}")
-            state.report = f"❌ Lỗi tạo báo cáo: {str(e)}\n\nChưa đủ dữ liệu — đang chờ cập nhật."
+            state['report'] = f"❌ Lỗi tạo báo cáo: {str(e)}\n\nChưa đủ dữ liệu — đang chờ cập nhật."
         
         return state
     
     def analyze_symbol(self, symbol: str) -> str:
         """Run complete analysis for a symbol"""
         try:
-            # Create initial state
-            initial_state = AgentState(symbol=symbol)
+            # Create initial state as dict
+            initial_state: GraphState = {
+                'symbol': symbol,
+                'raw_data': None,
+                'analysis': None,
+                'report': '',
+                'error': None
+            }
             
             # Run the graph
             final_state = self.graph.invoke(initial_state)
             
-            return final_state.report
+            return final_state['report']
             
         except Exception as e:
             print(f"❌ Error in agent workflow: {e}")
